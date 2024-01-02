@@ -189,7 +189,6 @@ export class Server {
 
   private publishBridge(): void {
     this.bridgeService.publishBridge();
-    this.printSetupInfo(this.config.bridge.pin);
   }
 
   private static loadConfig(): HomebridgeConfig {
@@ -549,26 +548,6 @@ export class Server {
         Array.from(this.childBridges.values()).map(x => x.getMetadata()),
       );
     });
-  }
-
-  private printSetupInfo(pin: string): void {
-    console.log("Setup Payload:");
-    console.log(this.bridgeService.bridge.setupURI());
-
-    if(!this.options.hideQRCode) {
-      console.log("Scan this code with your HomeKit app on your iOS device to pair with Homebridge:");
-      qrcode.setErrorLevel("M"); // HAP specifies level M or higher for ECC
-      qrcode.generate(this.bridgeService.bridge.setupURI());
-      console.log("Or enter this code with your HomeKit app on your iOS device to pair with Homebridge:");
-    } else {
-      console.log("Enter this code with your HomeKit app on your iOS device to pair with Homebridge:");
-    }
-
-    console.log(chalk.black.bgWhite("                       "));
-    console.log(chalk.black.bgWhite("    ┌────────────┐     "));
-    console.log(chalk.black.bgWhite("    │ " + pin + " │     "));
-    console.log(chalk.black.bgWhite("    └────────────┘     "));
-    console.log(chalk.black.bgWhite("                       "));
   }
 
 }

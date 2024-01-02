@@ -202,6 +202,7 @@ export class BridgeService {
 
       this.bridge.on(AccessoryEventTypes.LISTENING, (port: number) => {
         log.info("Homebridge v%s (HAP v%s) (%s) is running on port %s.", getVersion(), HAPLibraryVersion(), bridgeConfig.name, port);
+        this.printSetupInfo(bridgeConfig.pin, this.bridge);
       });
 
       // noinspection JSDeprecatedSymbols
@@ -464,7 +465,7 @@ export class BridgeService {
 
       hapAccessory.on(AccessoryEventTypes.LISTENING, (port: number) => {
         log.info("%s is running on port %s.", hapAccessory.displayName, port);
-        this.printSetupInfo(accessoryPin, accessory);
+        this.printSetupInfo(accessoryPin, hapAccessory);
         // log.info("Please add [%s] manually in Home app. Setup Code: %s", hapAccessory.displayName, accessoryPin);
       });
 
@@ -607,13 +608,13 @@ export class BridgeService {
     return info;
   }
 
-  private printSetupInfo(pin: string, accessory: PlatformAccessory): void {
+  private printSetupInfo(pin: string, accessory: Accessory): void {
     log.info("Setup Payload for %s:", accessory.displayName);
-    log.info(accessory._associatedHAPAccessory.setupURI());
+    log.info(accessory.setupURI());
 
     if(!this.bridgeOptions.hideQRCode) {
       qrcode.setErrorLevel("M"); // HAP specifies level M or higher for ECC
-      qrcode.generate(accessory._associatedHAPAccessory.setupURI(), output => {
+      qrcode.generate(accessory.setupURI(), output => {
         log.info(`Scan this code with your HomeKit app on your iOS device to pair with Homebridge:\n\n${output}\n\n                       ${pin}\n`);
       });
       log.info("Or enter this code with your HomeKit app on your iOS device to pair with Homebridge:");
