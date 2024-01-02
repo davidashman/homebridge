@@ -200,6 +200,7 @@ export class Server {
       name: "Homebridge",
       username: "CC:22:3D:E3:CE:30",
       pin: "031-45-154",
+      publishAllAccessories: false,
     };
 
     if (!fs.existsSync(configPath)) {
@@ -237,6 +238,7 @@ export class Server {
     bridge.name = bridge.name || defaultBridge.name;
     bridge.username = bridge.username || defaultBridge.username;
     bridge.pin = bridge.pin || defaultBridge.pin;
+    bridge.publishAllAccessories = bridge.publishAllAccessories || defaultBridge.publishAllAccessories;
     config.bridge = bridge;
 
     const username = config.bridge.username;

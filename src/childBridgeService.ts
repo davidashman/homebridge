@@ -360,6 +360,7 @@ export class ChildBridgeService {
       manufacturer: this.bridgeConfig.manufacturer || this.homebridgeConfig.bridge.manufacturer,
       model: this.bridgeConfig.model || this.homebridgeConfig.bridge.model,
       firmwareRevision: this.bridgeConfig.firmwareRevision || this.homebridgeConfig.bridge.firmwareRevision,
+      publishAllAccessories: this.bridgeConfig.publishAllAccessories || this.homebridgeConfig.bridge.publishAllAccessories,
     };
 
     const bridgeOptions: BridgeOptions = {

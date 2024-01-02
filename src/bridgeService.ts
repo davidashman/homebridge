@@ -39,6 +39,7 @@ import { HomebridgeOptions } from "./server";
 import { StorageService } from "./storageService";
 import * as mac from "./util/mac";
 import getVersion from "./version";
+import qrcode from "qrcode-terminal";
 
 const log = Logger.internal;
 
@@ -58,6 +59,7 @@ export interface BridgeConfiguration {
     DEBUG?: string;
     NODE_OPTIONS?: string;
   };
+  publishAllAccessories?: boolean;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -137,10 +139,16 @@ export class BridgeService {
     // bridged accessories, like changing characteristics (i.e. flipping your lights on and off).
     this.allowInsecureAccess = this.bridgeOptions.insecureAccess || false;
 
-    this.api.on(InternalAPIEvent.REGISTER_PLATFORM_ACCESSORIES, this.handleRegisterPlatformAccessories.bind(this));
-    this.api.on(InternalAPIEvent.UPDATE_PLATFORM_ACCESSORIES, this.handleUpdatePlatformAccessories.bind(this));
-    this.api.on(InternalAPIEvent.UNREGISTER_PLATFORM_ACCESSORIES, this.handleUnregisterPlatformAccessories.bind(this));
-    this.api.on(InternalAPIEvent.PUBLISH_EXTERNAL_ACCESSORIES, this.handlePublishExternalAccessories.bind(this));
+    if (this.bridgeConfig.publishAllAccessories) {
+      this.api.on(InternalAPIEvent.REGISTER_PLATFORM_ACCESSORIES, this.handlePublishExternalAccessories.bind(this));
+      this.api.on(InternalAPIEvent.UNREGISTER_PLATFORM_ACCESSORIES, this.handleUnpublishExternalAccessories.bind(this));
+      this.api.on(InternalAPIEvent.PUBLISH_EXTERNAL_ACCESSORIES, this.handlePublishExternalAccessories.bind(this));
+    } else {
+      this.api.on(InternalAPIEvent.REGISTER_PLATFORM_ACCESSORIES, this.handleRegisterPlatformAccessories.bind(this));
+      this.api.on(InternalAPIEvent.UPDATE_PLATFORM_ACCESSORIES, this.handleUpdatePlatformAccessories.bind(this));
+      this.api.on(InternalAPIEvent.UNREGISTER_PLATFORM_ACCESSORIES, this.handleUnregisterPlatformAccessories.bind(this));
+      this.api.on(InternalAPIEvent.PUBLISH_EXTERNAL_ACCESSORIES, this.handlePublishExternalAccessories.bind(this));
+    }
 
     this.bridge = new Bridge(bridgeConfig.name, uuid.generate("HomeBridge"));
     this.bridge.on(AccessoryEventTypes.CHARACTERISTIC_WARNING, () => {
@@ -183,70 +191,74 @@ export class BridgeService {
   }
 
   public publishBridge(): void {
-    const bridgeConfig = this.bridgeConfig;
+    if (!this.bridgeConfig.publishAllAccessories) {
+      const bridgeConfig = this.bridgeConfig;
 
-    const info = this.bridge.getService(Service.AccessoryInformation)!;
-    info.setCharacteristic(Characteristic.Manufacturer, bridgeConfig.manufacturer || "homebridge.io");
-    info.setCharacteristic(Characteristic.Model, bridgeConfig.model || "homebridge");
-    info.setCharacteristic(Characteristic.SerialNumber, bridgeConfig.username);
-    info.setCharacteristic(Characteristic.FirmwareRevision, bridgeConfig.firmwareRevision || getVersion());
+      const info = this.bridge.getService(Service.AccessoryInformation)!;
+      info.setCharacteristic(Characteristic.Manufacturer, bridgeConfig.manufacturer || "homebridge.io");
+      info.setCharacteristic(Characteristic.Model, bridgeConfig.model || "homebridge");
+      info.setCharacteristic(Characteristic.SerialNumber, bridgeConfig.username);
+      info.setCharacteristic(Characteristic.FirmwareRevision, bridgeConfig.firmwareRevision || getVersion());
 
-    this.bridge.on(AccessoryEventTypes.LISTENING, (port: number) => {
-      log.info("Homebridge v%s (HAP v%s) (%s) is running on port %s.", getVersion(), HAPLibraryVersion(), bridgeConfig.name, port);
-    });
+      this.bridge.on(AccessoryEventTypes.LISTENING, (port: number) => {
+        log.info("Homebridge v%s (HAP v%s) (%s) is running on port %s.", getVersion(), HAPLibraryVersion(), bridgeConfig.name, port);
+      });
 
-    // noinspection JSDeprecatedSymbols
-    const publishInfo: PublishInfo = {
-      username: bridgeConfig.username,
-      port: bridgeConfig.port,
-      pincode: bridgeConfig.pin,
-      category: Categories.BRIDGE,
-      bind: bridgeConfig.bind,
-      mdns: this.config.mdns, // this is deprecated now
-      addIdentifyingMaterial: true,
-      advertiser: bridgeConfig.advertiser,
-    };
+      // noinspection JSDeprecatedSymbols
+      const publishInfo: PublishInfo = {
+        username: bridgeConfig.username,
+        port: bridgeConfig.port,
+        pincode: bridgeConfig.pin,
+        category: Categories.BRIDGE,
+        bind: bridgeConfig.bind,
+        mdns: this.config.mdns, // this is deprecated now
+        addIdentifyingMaterial: true,
+        advertiser: bridgeConfig.advertiser,
+      };
 
-    if (bridgeConfig.setupID && bridgeConfig.setupID.length === 4) {
-      publishInfo.setupID = bridgeConfig.setupID;
+      if (bridgeConfig.setupID && bridgeConfig.setupID.length === 4) {
+        publishInfo.setupID = bridgeConfig.setupID;
+      }
+
+      log.debug("Publishing bridge accessory (name: %s, publishInfo: %o).", this.bridge.displayName, BridgeService.strippingPinCode(publishInfo));
+      this.bridge.publish(publishInfo, this.allowInsecureAccess);
     }
-
-    log.debug("Publishing bridge accessory (name: %s, publishInfo: %o).", this.bridge.displayName, BridgeService.strippingPinCode(publishInfo));
-    this.bridge.publish(publishInfo, this.allowInsecureAccess);
   }
 
   /**
    * Attempt to load the cached accessories from disk.
    */
   public async loadCachedPlatformAccessoriesFromDisk(): Promise<void> {
-    let cachedAccessories: SerializedPlatformAccessory[] | null = null;
+    if (!this.bridgeConfig.publishAllAccessories) {
+      let cachedAccessories: SerializedPlatformAccessory[] | null = null;
 
-    try {
-      cachedAccessories = await this.storageService.getItem<SerializedPlatformAccessory[]>(this.bridgeOptions.cachedAccessoriesItemName);
-    } catch (e) {
-      log.error("Failed to load cached accessories from disk:", e.message);
-      if (e instanceof SyntaxError) {
-        // syntax error probably means invalid json / corrupted file; try and restore from backup
-        cachedAccessories = await this.restoreCachedAccessoriesBackup();
-      } else {
-        log.error("Not restoring cached accessories - some accessories may be reset.");
+      try {
+        cachedAccessories = await this.storageService.getItem<SerializedPlatformAccessory[]>(this.bridgeOptions.cachedAccessoriesItemName);
+      } catch (e) {
+        log.error("Failed to load cached accessories from disk:", e.message);
+        if (e instanceof SyntaxError) {
+          // syntax error probably means invalid json / corrupted file; try and restore from backup
+          cachedAccessories = await this.restoreCachedAccessoriesBackup();
+        } else {
+          log.error("Not restoring cached accessories - some accessories may be reset.");
+        }
       }
-    }
 
-    if (cachedAccessories) {
-      log.info(`Loaded ${cachedAccessories.length} cached accessories from ${this.bridgeOptions.cachedAccessoriesItemName}.`);
+      if (cachedAccessories) {
+        log.info(`Loaded ${cachedAccessories.length} cached accessories from ${this.bridgeOptions.cachedAccessoriesItemName}.`);
 
-      this.cachedPlatformAccessories = cachedAccessories.map(serialized => {
-        return PlatformAccessory.deserialize(serialized);
-      });
+        this.cachedPlatformAccessories = cachedAccessories.map(serialized => {
+          return PlatformAccessory.deserialize(serialized);
+        });
 
-      if (cachedAccessories.length) {
-        // create a backup of the cache file
-        await this.createCachedAccessoriesBackup();
+        if (cachedAccessories.length) {
+          // create a backup of the cache file
+          await this.createCachedAccessoriesBackup();
+        }
       }
-    }
 
-    this.cachedAccessoriesFileLoaded = true;
+      this.cachedAccessoriesFileLoaded = true;
+    }
   }
 
   /**
@@ -273,69 +285,75 @@ export class BridgeService {
    * This is used if the main cache file has a JSON syntax error / is corrupted
    */
   private async restoreCachedAccessoriesBackup(): Promise<SerializedPlatformAccessory[] | null> {
-    try {
-      const cachedAccessories = await this.storageService.getItem<SerializedPlatformAccessory[]>(this.backupCacheFileName);
-      if (cachedAccessories && cachedAccessories.length) {
-        log.warn(`Recovered ${cachedAccessories.length} accessories from ${this.bridgeOptions.cachedAccessoriesItemName} cache backup.`);
+    if (!this.bridgeConfig.publishAllAccessories) {
+      try {
+        const cachedAccessories = await this.storageService.getItem<SerializedPlatformAccessory[]>(this.backupCacheFileName);
+        if (cachedAccessories && cachedAccessories.length) {
+          log.warn(`Recovered ${cachedAccessories.length} accessories from ${this.bridgeOptions.cachedAccessoriesItemName} cache backup.`);
+        }
+        return cachedAccessories;
+      } catch (e) {
+        return null;
       }
-      return cachedAccessories;
-    } catch (e) {
-      return null;
     }
+
+    return null;
   }
 
   public restoreCachedPlatformAccessories(): void {
-    this.cachedPlatformAccessories = this.cachedPlatformAccessories.filter(accessory => {
-      let plugin = this.pluginManager.getPlugin(accessory._associatedPlugin!);
-      if (!plugin) { // a little explainer here. This section is basically here to resolve plugin name changes of dynamic platform plugins
-        try {
-          // resolve platform accessories by searching for plugins which registered a dynamic platform for the given name
-          plugin = this.pluginManager.getPluginByActiveDynamicPlatform(accessory._associatedPlatform!);
+    if (!this.bridgeConfig.publishAllAccessories) {
+      this.cachedPlatformAccessories = this.cachedPlatformAccessories.filter(accessory => {
+        let plugin = this.pluginManager.getPlugin(accessory._associatedPlugin!);
+        if (!plugin) { // a little explainer here. This section is basically here to resolve plugin name changes of dynamic platform plugins
+          try {
+            // resolve platform accessories by searching for plugins which registered a dynamic platform for the given name
+            plugin = this.pluginManager.getPluginByActiveDynamicPlatform(accessory._associatedPlatform!);
 
-          if (plugin) { // if it's undefined the no plugin was found
-            // could improve on this by calculating the Levenshtein distance to only allow platform ownership changes
-            // when something like a typo happened. Are there other reasons the name could change?
-            // And how would we define the threshold?
+            if (plugin) { // if it's undefined the no plugin was found
+              // could improve on this by calculating the Levenshtein distance to only allow platform ownership changes
+              // when something like a typo happened. Are there other reasons the name could change?
+              // And how would we define the threshold?
 
-            log.info("When searching for the associated plugin of the accessory '" + accessory.displayName + "' " +
-              "it seems like the plugin name changed from '" + accessory._associatedPlugin + "' to '" +
-              plugin.getPluginIdentifier() + "'. Plugin association is now being transformed!");
+              log.info("When searching for the associated plugin of the accessory '" + accessory.displayName + "' " +
+                "it seems like the plugin name changed from '" + accessory._associatedPlugin + "' to '" +
+                plugin.getPluginIdentifier() + "'. Plugin association is now being transformed!");
 
-            accessory._associatedPlugin = plugin.getPluginIdentifier(); // update the associated plugin to the new one
+              accessory._associatedPlugin = plugin.getPluginIdentifier(); // update the associated plugin to the new one
+            }
+          } catch (error) { // error is thrown if multiple plugins where found for the given platform name
+            log.info("Could not find the associated plugin for the accessory '" + accessory.displayName + "'. " +
+              "Tried to find the plugin by the platform name but " + error.message);
           }
-        } catch (error) { // error is thrown if multiple plugins where found for the given platform name
-          log.info("Could not find the associated plugin for the accessory '" + accessory.displayName + "'. " +
-            "Tried to find the plugin by the platform name but " + error.message);
         }
-      }
 
-      const platformPlugins = plugin && plugin.getActiveDynamicPlatform(accessory._associatedPlatform!);
-      if (plugin) {
-        accessory._associatedHAPAccessory.on(AccessoryEventTypes.CHARACTERISTIC_WARNING, BridgeService.printCharacteristicWriteWarning.bind(this, plugin, accessory._associatedHAPAccessory, {}));
-      }
+        const platformPlugins = plugin && plugin.getActiveDynamicPlatform(accessory._associatedPlatform!);
+        if (plugin) {
+          accessory._associatedHAPAccessory.on(AccessoryEventTypes.CHARACTERISTIC_WARNING, BridgeService.printCharacteristicWriteWarning.bind(this, plugin, accessory._associatedHAPAccessory, {}));
+        }
 
-      if (!platformPlugins) {
-        log.info(`Failed to find plugin to handle accessory ${accessory._associatedHAPAccessory.displayName}`);
-        if (!this.bridgeOptions.keepOrphanedCachedAccessories) {
-          log.info(`Removing orphaned accessory ${accessory._associatedHAPAccessory.displayName}`);
+        if (!platformPlugins) {
+          log.info(`Failed to find plugin to handle accessory ${accessory._associatedHAPAccessory.displayName}`);
+          if (!this.bridgeOptions.keepOrphanedCachedAccessories) {
+            log.info(`Removing orphaned accessory ${accessory._associatedHAPAccessory.displayName}`);
+            return false; // filter it from the list
+          }
+        } else {
+          // we set the current plugin version before configureAccessory is called, so the dev has the opportunity to override it
+          accessory.getService(Service.AccessoryInformation)!
+            .setCharacteristic(Characteristic.FirmwareRevision, plugin!.version);
+
+          platformPlugins.configureAccessory(accessory);
+        }
+
+        try {
+          this.bridge.addBridgedAccessory(accessory._associatedHAPAccessory);
+        } catch (e) {
+          log.warn(`${accessory._associatedPlugin ? getLogPrefix(accessory._associatedPlugin) : ""} Could not restore cached accessory '${accessory._associatedHAPAccessory.displayName}':`, e?.message);
           return false; // filter it from the list
         }
-      } else {
-        // we set the current plugin version before configureAccessory is called, so the dev has the opportunity to override it
-        accessory.getService(Service.AccessoryInformation)!
-          .setCharacteristic(Characteristic.FirmwareRevision, plugin!.version);
-
-        platformPlugins.configureAccessory(accessory);
-      }
-
-      try {
-        this.bridge.addBridgedAccessory(accessory._associatedHAPAccessory);
-      } catch (e) {
-        log.warn(`${accessory._associatedPlugin ? getLogPrefix(accessory._associatedPlugin): ""} Could not restore cached accessory '${accessory._associatedHAPAccessory.displayName}':`, e?.message);
-        return false; // filter it from the list
-      }
-      return true; // keep it in the list
-    });
+        return true; // keep it in the list
+      });
+    }
   }
 
   /**
@@ -405,6 +423,15 @@ export class BridgeService {
     this.saveCachedPlatformAccessoriesOnDisk();
   }
 
+  async handleUnpublishExternalAccessories(accessories: PlatformAccessory[]): Promise<void> {
+    for (const accessory of accessories) {
+      const hapAccessory = accessory._associatedHAPAccessory;
+      const advertiseAddress = mac.generate(hapAccessory.UUID);
+      this.publishedExternalAccessories.delete(advertiseAddress);
+      await hapAccessory.unpublish();
+    }
+  }
+
   async handlePublishExternalAccessories(accessories: PlatformAccessory[]): Promise<void> {
     const accessoryPin = this.bridgeConfig.pin;
 
@@ -437,7 +464,8 @@ export class BridgeService {
 
       hapAccessory.on(AccessoryEventTypes.LISTENING, (port: number) => {
         log.info("%s is running on port %s.", hapAccessory.displayName, port);
-        log.info("Please add [%s] manually in Home app. Setup Code: %s", hapAccessory.displayName, accessoryPin);
+        this.printSetupInfo(accessoryPin, accessory);
+        // log.info("Please add [%s] manually in Home app. Setup Code: %s", hapAccessory.displayName, accessoryPin);
       });
 
       // noinspection JSDeprecatedSymbols
@@ -578,4 +606,20 @@ export class BridgeService {
     info.pincode = "***-**-***";
     return info;
   }
+
+  private printSetupInfo(pin: string, accessory: PlatformAccessory): void {
+    log.info("Setup Payload for %s:", accessory.displayName);
+    log.info(accessory._associatedHAPAccessory.setupURI());
+
+    if(!this.bridgeOptions.hideQRCode) {
+      qrcode.setErrorLevel("M"); // HAP specifies level M or higher for ECC
+      qrcode.generate(accessory._associatedHAPAccessory.setupURI(), output => {
+        log.info(`Scan this code with your HomeKit app on your iOS device to pair with Homebridge:\n\n${output}\n\n                       ${pin}\n`);
+      });
+      log.info("Or enter this code with your HomeKit app on your iOS device to pair with Homebridge:");
+    } else {
+      log.info(`Enter this code with your HomeKit app on your iOS device to pair with Homebridge: ${pin}`);
+    }
+  }
+
 }
