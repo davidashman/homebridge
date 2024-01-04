@@ -111,33 +111,6 @@ export interface CharacteristicWarningOpts {
   ignoreSlow?: boolean;
 }
 
-const ServiceCategories: Map<string, number> = new Map([
-  [Service.Lightbulb.UUID, Categories.LIGHTBULB],
-  [Service.Door.UUID, Categories.DOOR],
-  [Service.LockMechanism.UUID, Categories.DOOR_LOCK],
-  [Service.Fan.UUID, Categories.FAN],
-  [Service.Fanv2.UUID, Categories.FAN],
-  [Service.AirPurifier.UUID, Categories.AIR_PURIFIER],
-  [Service.HeaterCooler.UUID, Categories.AIR_CONDITIONER],
-  [Service.Thermostat.UUID, Categories.THERMOSTAT],
-  [Service.Switch.UUID, Categories.SWITCH],
-  [Service.Faucet.UUID, Categories.FAUCET],
-  [Service.Doorbell.UUID, Categories.VIDEO_DOORBELL],
-  [Service.GarageDoorOpener.UUID, Categories.GARAGE_DOOR_OPENER],
-  [Service.HumidifierDehumidifier.UUID, Categories.AIR_HUMIDIFIER],
-  [Service.Outlet.UUID, Categories.OUTLET],
-  [Service.WiFiRouter.UUID, Categories.ROUTER],
-  [Service.SecuritySystem.UUID, Categories.SECURITY_SYSTEM],
-  [Service.Television.UUID, Categories.TELEVISION],
-  [Service.Speaker.UUID, Categories.SPEAKER],
-  [Service.StatefulProgrammableSwitch.UUID, Categories.PROGRAMMABLE_SWITCH],
-  [Service.StatelessProgrammableSwitch.UUID, Categories.PROGRAMMABLE_SWITCH],
-  [Service.Slats.UUID, Categories.WINDOW_COVERING],
-  [Service.WindowCovering.UUID, Categories.WINDOW_COVERING],
-  [Service.Window.UUID, Categories.WINDOW],
-  [Service.CameraOperatingMode.UUID, Categories.CAMERA],
-]);
-
 export class BridgeService {
   public bridge: Bridge;
   private storageService: StorageService;
@@ -500,7 +473,7 @@ export class BridgeService {
       const publishInfo: PublishInfo = {
         username: advertiseAddress,
         pincode: accessoryPin,
-        category: this.publishedCategory(accessory),
+        category: accessory.category,
         port: accessoryPort,
         bind: this.bridgeConfig.bind,
         mdns: this.config.mdns, // this is deprecated and not used anymore
@@ -511,23 +484,6 @@ export class BridgeService {
       log.debug("Publishing external accessory (name: %s, publishInfo: %o).", hapAccessory.displayName, BridgeService.strippingPinCode(publishInfo));
       hapAccessory.publish(publishInfo, this.allowInsecureAccess);
     }
-  }
-
-  publishedCategory(accessory: PlatformAccessory) {
-    let publishedCategory = accessory.category;
-
-    if (publishedCategory === Categories.OTHER) {
-      // The category wasn't set, so we want to override it with the first service
-      const primaryService = accessory.services.find(s => {
-        return s.isPrimaryService;
-      });
-
-      if (primaryService) {
-        publishedCategory = ServiceCategories.get(primaryService.UUID) || accessory.category;
-      }
-    }
-
-    return publishedCategory;
   }
 
   public createHAPAccessory(plugin: Plugin, accessoryInstance: AccessoryPlugin, displayName: string, accessoryType: AccessoryName | AccessoryIdentifier, uuidBase?: string): Accessory | undefined {
