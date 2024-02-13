@@ -320,7 +320,7 @@ export class BridgeService {
       }
 
       if (!platformPlugins) {
-        log.info(`Failed to find plugin to handle accessory ${accessory._associatedHAPAccessory.displayName}`);
+        log.info(`Bridge ${this.bridgeConfig.username} failed to find plugin ${accessory._associatedPlugin!} to handle accessory ${accessory._associatedHAPAccessory.displayName}`);
         if (!this.bridgeOptions.keepOrphanedCachedAccessories) {
           log.info(`Removing orphaned accessory ${accessory._associatedHAPAccessory.displayName}`);
           return false; // filter it from the list
