@@ -139,16 +139,10 @@ export class BridgeService {
     // bridged accessories, like changing characteristics (i.e. flipping your lights on and off).
     this.allowInsecureAccess = this.bridgeOptions.insecureAccess || false;
 
-    if (this.bridgeConfig.publishAllAccessories) {
-      this.api.on(InternalAPIEvent.REGISTER_PLATFORM_ACCESSORIES, this.handlePublishExternalAccessories.bind(this));
-      this.api.on(InternalAPIEvent.UNREGISTER_PLATFORM_ACCESSORIES, this.handleUnpublishExternalAccessories.bind(this));
-      this.api.on(InternalAPIEvent.PUBLISH_EXTERNAL_ACCESSORIES, this.handlePublishExternalAccessories.bind(this));
-    } else {
-      this.api.on(InternalAPIEvent.REGISTER_PLATFORM_ACCESSORIES, this.handleRegisterPlatformAccessories.bind(this));
-      this.api.on(InternalAPIEvent.UPDATE_PLATFORM_ACCESSORIES, this.handleUpdatePlatformAccessories.bind(this));
-      this.api.on(InternalAPIEvent.UNREGISTER_PLATFORM_ACCESSORIES, this.handleUnregisterPlatformAccessories.bind(this));
-      this.api.on(InternalAPIEvent.PUBLISH_EXTERNAL_ACCESSORIES, this.handlePublishExternalAccessories.bind(this));
-    }
+    this.api.on(InternalAPIEvent.REGISTER_PLATFORM_ACCESSORIES, this.handleRegisterPlatformAccessories.bind(this));
+    this.api.on(InternalAPIEvent.UPDATE_PLATFORM_ACCESSORIES, this.handleUpdatePlatformAccessories.bind(this));
+    this.api.on(InternalAPIEvent.UNREGISTER_PLATFORM_ACCESSORIES, this.handleUnregisterPlatformAccessories.bind(this));
+    this.api.on(InternalAPIEvent.PUBLISH_EXTERNAL_ACCESSORIES, this.handlePublishExternalAccessories.bind(this));
 
     this.bridge = new Bridge(bridgeConfig.name, uuid.generate("HomeBridge"));
     this.bridge.on(AccessoryEventTypes.CHARACTERISTIC_WARNING, () => {
@@ -347,7 +341,11 @@ export class BridgeService {
         }
 
         try {
-          this.bridge.addBridgedAccessory(accessory._associatedHAPAccessory);
+          if (this.bridgeConfig.publishAllAccessories) {
+            this.handlePublishExternalAccessories([accessory]);
+          } else {
+            this.bridge.addBridgedAccessory(accessory._associatedHAPAccessory);
+          }
         } catch (e) {
           log.warn(`${accessory._associatedPlugin ? getLogPrefix(accessory._associatedPlugin) : ""} Could not restore cached accessory '${accessory._associatedHAPAccessory.displayName}':`, e?.message);
           return false; // filter it from the list
@@ -400,8 +398,13 @@ export class BridgeService {
       return accessory._associatedHAPAccessory;
     });
 
-    this.bridge.addBridgedAccessories(hapAccessories);
-    this.saveCachedPlatformAccessoriesOnDisk();
+    if (this.bridgeConfig.publishAllAccessories) {
+      this.handlePublishExternalAccessories(accessories)
+        .then(this.saveCachedPlatformAccessoriesOnDisk.bind(this))
+    } else {
+      this.bridge.addBridgedAccessories(hapAccessories);
+      this.saveCachedPlatformAccessoriesOnDisk();
+    }
   }
 
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -420,8 +423,13 @@ export class BridgeService {
       return accessory._associatedHAPAccessory;
     });
 
-    this.bridge.removeBridgedAccessories(hapAccessories);
-    this.saveCachedPlatformAccessoriesOnDisk();
+    if (this.bridgeConfig.publishAllAccessories) {
+      this.handleUnpublishExternalAccessories(accessories)
+        .then(this.saveCachedPlatformAccessoriesOnDisk.bind(this))
+    } else {
+      this.bridge.removeBridgedAccessories(hapAccessories);
+      this.saveCachedPlatformAccessoriesOnDisk();
+    }
   }
 
   async handleUnpublishExternalAccessories(accessories: PlatformAccessory[]): Promise<void> {
