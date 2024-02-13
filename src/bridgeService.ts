@@ -224,36 +224,34 @@ export class BridgeService {
    * Attempt to load the cached accessories from disk.
    */
   public async loadCachedPlatformAccessoriesFromDisk(): Promise<void> {
-    if (!this.bridgeConfig.publishAllAccessories) {
-      let cachedAccessories: SerializedPlatformAccessory[] | null = null;
+    let cachedAccessories: SerializedPlatformAccessory[] | null = null;
 
-      try {
-        cachedAccessories = await this.storageService.getItem<SerializedPlatformAccessory[]>(this.bridgeOptions.cachedAccessoriesItemName);
-      } catch (e) {
-        log.error("Failed to load cached accessories from disk:", e.message);
-        if (e instanceof SyntaxError) {
-          // syntax error probably means invalid json / corrupted file; try and restore from backup
-          cachedAccessories = await this.restoreCachedAccessoriesBackup();
-        } else {
-          log.error("Not restoring cached accessories - some accessories may be reset.");
-        }
+    try {
+      cachedAccessories = await this.storageService.getItem<SerializedPlatformAccessory[]>(this.bridgeOptions.cachedAccessoriesItemName);
+    } catch (e) {
+      log.error("Failed to load cached accessories from disk:", e.message);
+      if (e instanceof SyntaxError) {
+        // syntax error probably means invalid json / corrupted file; try and restore from backup
+        cachedAccessories = await this.restoreCachedAccessoriesBackup();
+      } else {
+        log.error("Not restoring cached accessories - some accessories may be reset.");
       }
-
-      if (cachedAccessories) {
-        log.info(`Loaded ${cachedAccessories.length} cached accessories from ${this.bridgeOptions.cachedAccessoriesItemName}.`);
-
-        this.cachedPlatformAccessories = cachedAccessories.map(serialized => {
-          return PlatformAccessory.deserialize(serialized);
-        });
-
-        if (cachedAccessories.length) {
-          // create a backup of the cache file
-          await this.createCachedAccessoriesBackup();
-        }
-      }
-
-      this.cachedAccessoriesFileLoaded = true;
     }
+
+    if (cachedAccessories) {
+      log.info(`Loaded ${cachedAccessories.length} cached accessories from ${this.bridgeOptions.cachedAccessoriesItemName}.`);
+
+      this.cachedPlatformAccessories = cachedAccessories.map(serialized => {
+        return PlatformAccessory.deserialize(serialized);
+      });
+
+      if (cachedAccessories.length) {
+        // create a backup of the cache file
+        await this.createCachedAccessoriesBackup();
+      }
+    }
+
+    this.cachedAccessoriesFileLoaded = true;
   }
 
   /**
@@ -280,79 +278,73 @@ export class BridgeService {
    * This is used if the main cache file has a JSON syntax error / is corrupted
    */
   private async restoreCachedAccessoriesBackup(): Promise<SerializedPlatformAccessory[] | null> {
-    if (!this.bridgeConfig.publishAllAccessories) {
-      try {
-        const cachedAccessories = await this.storageService.getItem<SerializedPlatformAccessory[]>(this.backupCacheFileName);
-        if (cachedAccessories && cachedAccessories.length) {
-          log.warn(`Recovered ${cachedAccessories.length} accessories from ${this.bridgeOptions.cachedAccessoriesItemName} cache backup.`);
-        }
-        return cachedAccessories;
-      } catch (e) {
-        return null;
+    try {
+      const cachedAccessories = await this.storageService.getItem<SerializedPlatformAccessory[]>(this.backupCacheFileName);
+      if (cachedAccessories && cachedAccessories.length) {
+        log.warn(`Recovered ${cachedAccessories.length} accessories from ${this.bridgeOptions.cachedAccessoriesItemName} cache backup.`);
       }
+      return cachedAccessories;
+    } catch (e) {
+      return null;
     }
-
-    return null;
   }
 
   public restoreCachedPlatformAccessories(): void {
-    if (!this.bridgeConfig.publishAllAccessories) {
-      this.cachedPlatformAccessories = this.cachedPlatformAccessories.filter(accessory => {
-        let plugin = this.pluginManager.getPlugin(accessory._associatedPlugin!);
-        if (!plugin) { // a little explainer here. This section is basically here to resolve plugin name changes of dynamic platform plugins
-          try {
-            // resolve platform accessories by searching for plugins which registered a dynamic platform for the given name
-            plugin = this.pluginManager.getPluginByActiveDynamicPlatform(accessory._associatedPlatform!);
-
-            if (plugin) { // if it's undefined the no plugin was found
-              // could improve on this by calculating the Levenshtein distance to only allow platform ownership changes
-              // when something like a typo happened. Are there other reasons the name could change?
-              // And how would we define the threshold?
-
-              log.info("When searching for the associated plugin of the accessory '" + accessory.displayName + "' " +
-                "it seems like the plugin name changed from '" + accessory._associatedPlugin + "' to '" +
-                plugin.getPluginIdentifier() + "'. Plugin association is now being transformed!");
-
-              accessory._associatedPlugin = plugin.getPluginIdentifier(); // update the associated plugin to the new one
-            }
-          } catch (error) { // error is thrown if multiple plugins where found for the given platform name
-            log.info("Could not find the associated plugin for the accessory '" + accessory.displayName + "'. " +
-              "Tried to find the plugin by the platform name but " + error.message);
-          }
-        }
-
-        const platformPlugins = plugin && plugin.getActiveDynamicPlatform(accessory._associatedPlatform!);
-        if (plugin) {
-          accessory._associatedHAPAccessory.on(AccessoryEventTypes.CHARACTERISTIC_WARNING, BridgeService.printCharacteristicWriteWarning.bind(this, plugin, accessory._associatedHAPAccessory, {}));
-        }
-
-        if (!platformPlugins) {
-          log.info(`Failed to find plugin to handle accessory ${accessory._associatedHAPAccessory.displayName}`);
-          if (!this.bridgeOptions.keepOrphanedCachedAccessories) {
-            log.info(`Removing orphaned accessory ${accessory._associatedHAPAccessory.displayName}`);
-            return false; // filter it from the list
-          }
-        } else {
-          // we set the current plugin version before configureAccessory is called, so the dev has the opportunity to override it
-          accessory.getService(Service.AccessoryInformation)!
-            .setCharacteristic(Characteristic.FirmwareRevision, plugin!.version);
-
-          platformPlugins.configureAccessory(accessory);
-        }
-
+    this.cachedPlatformAccessories = this.cachedPlatformAccessories.filter(accessory => {
+      let plugin = this.pluginManager.getPlugin(accessory._associatedPlugin!);
+      if (!plugin) { // a little explainer here. This section is basically here to resolve plugin name changes of dynamic platform plugins
         try {
-          if (this.bridgeConfig.publishAllAccessories) {
-            this.handlePublishExternalAccessories([accessory]);
-          } else {
-            this.bridge.addBridgedAccessory(accessory._associatedHAPAccessory);
+          // resolve platform accessories by searching for plugins which registered a dynamic platform for the given name
+          plugin = this.pluginManager.getPluginByActiveDynamicPlatform(accessory._associatedPlatform!);
+
+          if (plugin) { // if it's undefined the no plugin was found
+            // could improve on this by calculating the Levenshtein distance to only allow platform ownership changes
+            // when something like a typo happened. Are there other reasons the name could change?
+            // And how would we define the threshold?
+
+            log.info("When searching for the associated plugin of the accessory '" + accessory.displayName + "' " +
+              "it seems like the plugin name changed from '" + accessory._associatedPlugin + "' to '" +
+              plugin.getPluginIdentifier() + "'. Plugin association is now being transformed!");
+
+            accessory._associatedPlugin = plugin.getPluginIdentifier(); // update the associated plugin to the new one
           }
-        } catch (e) {
-          log.warn(`${accessory._associatedPlugin ? getLogPrefix(accessory._associatedPlugin) : ""} Could not restore cached accessory '${accessory._associatedHAPAccessory.displayName}':`, e?.message);
+        } catch (error) { // error is thrown if multiple plugins where found for the given platform name
+          log.info("Could not find the associated plugin for the accessory '" + accessory.displayName + "'. " +
+            "Tried to find the plugin by the platform name but " + error.message);
+        }
+      }
+
+      const platformPlugins = plugin && plugin.getActiveDynamicPlatform(accessory._associatedPlatform!);
+      if (plugin) {
+        accessory._associatedHAPAccessory.on(AccessoryEventTypes.CHARACTERISTIC_WARNING, BridgeService.printCharacteristicWriteWarning.bind(this, plugin, accessory._associatedHAPAccessory, {}));
+      }
+
+      if (!platformPlugins) {
+        log.info(`Failed to find plugin to handle accessory ${accessory._associatedHAPAccessory.displayName}`);
+        if (!this.bridgeOptions.keepOrphanedCachedAccessories) {
+          log.info(`Removing orphaned accessory ${accessory._associatedHAPAccessory.displayName}`);
           return false; // filter it from the list
         }
-        return true; // keep it in the list
-      });
-    }
+      } else {
+        // we set the current plugin version before configureAccessory is called, so the dev has the opportunity to override it
+        accessory.getService(Service.AccessoryInformation)!
+          .setCharacteristic(Characteristic.FirmwareRevision, plugin!.version);
+
+        platformPlugins.configureAccessory(accessory);
+      }
+
+      try {
+        if (this.bridgeConfig.publishAllAccessories) {
+          this.handlePublishExternalAccessories([accessory]);
+        } else {
+          this.bridge.addBridgedAccessory(accessory._associatedHAPAccessory);
+        }
+      } catch (e) {
+        log.warn(`${accessory._associatedPlugin ? getLogPrefix(accessory._associatedPlugin) : ""} Could not restore cached accessory '${accessory._associatedHAPAccessory.displayName}':`, e?.message);
+        return false; // filter it from the list
+      }
+      return true; // keep it in the list
+    });
   }
 
   /**
