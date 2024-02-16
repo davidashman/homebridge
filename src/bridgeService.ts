@@ -477,7 +477,7 @@ export class BridgeService {
         port: accessoryPort,
         bind: this.bridgeConfig.bind,
         mdns: this.config.mdns, // this is deprecated and not used anymore
-        addIdentifyingMaterial: true,
+        addIdentifyingMaterial: !this.bridgeConfig.publishAllAccessories,
         advertiser: this.bridgeConfig.advertiser,
       };
 
